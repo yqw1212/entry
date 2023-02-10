@@ -231,6 +231,7 @@ class simulate:
             }[ length ]
         except KeyError:
             dbg_prnt(DBG_LVL_3, "Reading %d bytes from 0x%x" % (length, addr))
+
             return state.memory.load(addr, length)  # for other sizes, just use load() 
         '''
 
@@ -253,6 +254,7 @@ class simulate:
         elif length == 8: state.mem[addr].uint64_t = value
         else:
             dbg_prnt(DBG_LVL_3, "Writing %d bytes to 0x%x" % (length, addr))
+
             state.memory.store(addr, value, length)
         '''
 
@@ -1700,7 +1702,7 @@ class simulate:
         dbg_prnt(DBG_LVL_2, "Simulating edge (0x%x, 0x%x) for UID = %d" % (currb, nextb, uid))
 
 
-        # indicate the boundaries
+        # indicate the boundaries 
 #        self.__blk_start = currb
 #        self.__blk_end   = currb + ADDR2NODE[currb].size
 #
@@ -1708,7 +1710,7 @@ class simulate:
 #        print 'BLK ENDDD', hex(self.__blk_end)
 
 
-#        for a in self.__imm: print 'self.__imm', hex(a)
+#        for a in self.__imm: print 'self.__imm', hex(a)        
 
         # Check if current basic block matches with the address of the current state
         if currb != self.__state.addr:              # base check            
@@ -2102,7 +2104,7 @@ class simulate:
             self.unchecked_regsets = unchecked[:]
 
         return -1
-
+       
     # ---------------------------------------------------------------------------------------------
     # __deepcopy__():
     #
@@ -2110,8 +2112,10 @@ class simulate:
     #
     '''
     def __deepcopy__(self, memo):
+
         print '__deepcopy__(%s)' % str(memo)
         return simulate(copy.deepcopy(self, memo))
+
         fatal('return ORM(copy.deepcopy(dict(self)))')
     '''
 
@@ -2362,13 +2366,16 @@ class simulate:
     #
     def __make_relative( self, addr ):
         '''
-        # TODO: breaks for eval/orzhttpd/orzhttpd -s payloads/memrd.spl
+        # TODO: breaks for eval/orzhttpd/orzhttpd -s payloads/memrd.spl        
         elif abs(addr - FRAMEPTR_BASE_ADDR) < MAX_BOUND or abs(addr - RSP_BASE_ADDR) < MAX_BOUND:
+
             if abs(addr - RSP_BASE_ADDR) < abs(addr - FRAMEPTR_BASE_ADDR):
+
                 if addr > RSP_BASE_ADDR:
                     return "($stack + 0x%03x)" % (addr - RSP_BASE_ADDR)
                 else:
                     return "($stack - 0x%03x)" % (RSP_BASE_ADDR - addr)
+
             else:
                 if addr > FRAMEPTR_BASE_ADDR:
                     return "($frame + 0x%03x)" % (addr - FRAMEPTR_BASE_ADDR)

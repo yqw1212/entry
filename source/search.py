@@ -32,6 +32,7 @@ import map      as M
 import path     as P
 import delta    as D
 import simulate as S
+import output   as O
 
 import math
 
@@ -285,9 +286,35 @@ class search:
 
 
             emph('Solution found!', DBG_LVL_1)
+            dbg_arb(DBG_LVL_2, 'Path so far', path)
+
+            # base case. Tree enumerated successfully
+            # if we reach this point we have a solution (a trace)
+
+            simulation.finalize()
+
+            self.__simstash.append(simulation) 
+
+            # if you want to visualize things
+            #
+            # visualize('cfg_paths', entry=self.__ep,
+            #            options=VO_DRAW_CFG | VO_DRAW_CLOBBERING |
+            #            VO_DRAW_ACCEPTED | VO_DRAW_SE_PATHS, paths=allp)
+    
+            # self.__total_path.union(totpath)
+            for a in totpath:
+                self.__total_path.add(a)
+
+            X = []
+            for a,b,c in path:
+                X.append( (c, a) )
+
+            for a, b in to_edges(X):
+                self.__path.add((a,b))
 
             # print 'TOTAL_PATH', totpath, self.__total_path
             return 0
+            
 
 
         # ---------------------------------------------------------------------
@@ -342,10 +369,15 @@ class search:
             if len(tree[0]) != 2:
                 raise Exception('Conditionals with >2 jump targets are not supported.')
 
+            # fork state            
+            # print 'FORK', path
+            # print 'TREEFORK', tree
 
             uid0, _, _ = tree[0][0][0]
             uid1, _, _ = tree[0][1][0]
 
+            # print 'UID0', uid0
+            # print 'UID1', uid1
 
             if uid0 != uid1 and self.__IR[uid0]['type'] != 'cond':
                 raise Exception('Invalid!!! WTF should not happen!')
@@ -385,6 +417,96 @@ class search:
             raise Exception('Malformed tree!')
 
         return 0
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # __consistent_stashes(): This function checks whether all stashes (i.e., valid solutions) are 
+    #       consistent. This is meaningful when delta graph is not flat (i.e., there are >1 active
+    #       stashes)
+    #
+    # :Ret: If stashes are consistent, function returns True. Otherwise, it returns False.
+    #
+    def __consistent_stashes( self ):
+        if len(self.__simstash) < 2:
+            return True
+
+        dbg_prnt(DBG_LVL_1, 'Checking whether stashes are consistent ...')
+
+        for simu in self.__simstash:
+            print 'Simulation', simu, simu.constraints()
+
+            # ispo: you're fixed ;)
+            # error('__consistent_stashes says: fix me ispo!!!!!')
+
+
+        # check if inireg, mem, and ext are consistent
+        for i in range(len(self.__simstash)):
+            for j in range(i+1, len(self.__simstash)):
+
+                # check
+                sim_a = self.__simstash[i]
+                sim_b = self.__simstash[j]
+                
+
+                sim_a.update_globals()          # update global variables
+                sim_b.update_globals()
+
+                # self.__inireg[ reg ] = val
+                for a, b in sim_a.inireg.iteritems():
+                    if b == None:
+                        continue
+                    
+                    if sim_b.inireg[a] != None and sim_b.inireg[a] != b:
+                        
+                        warn("Inconsistent values (0x%x != 0x%x) for register '%s'" % 
+                                (b, sim_b.inireg[a], a))
+
+                        return False
+
+    
+                for a, b in sim_a.mem.iteritems():
+                    if not b:                       # skip unneeded memory writes
+                        continue
+
+
+                    # address is used in both stashes
+                    if a in sim_b.mem and sim_b.mem[a]: 
+
+                        if not isinstance(b, tuple) or not isinstance(sim_b.mem[a], tuple):
+                            continue
+
+                        if b[0] != sim_b.mem[a][0]:
+                            
+                            warn("Inconsistent values (0x%x:%d != 0x%x:%d) for address '0x%x'" % 
+                                (b[0], b[1], sim_b.mem[a][0], sim_b.mem[a][1], a))
+
+                            # what if sizes are different?
+                            if b[1] != sim_b.mem[a][1]:
+                                fatal('Idk how to handle that!!!!!!!')
+                            
+                            return False
+
+
+                # self.__ext[ var ] = (addr, value)
+                for a, b in sim_a.ext.iteritems():
+                    
+
+                    if a.shallow_repr() in sim_b.ext and sim_b.ext[a.shallow_repr()] != b:
+                        warn("Inconsistent values (0x%x:%d != 0x%x:%d) for external input '%s'" % 
+                                (b, sim_b.ext[a][0], sim_b.ext[a][1], a[0], a[1]))
+
+                        return False
+
+        for a, b in sim_a.mem.iteritems():
+            print 'MEM A', hex(a), b
+
+        print '---------------------------------------------------------'
+        for a, b in sim_b.mem.iteritems():
+            print 'MEM B', hex(a), b
+
+        # Assume they're ok for now...
+        return True
         
 
 
@@ -404,6 +526,24 @@ class search:
         self.__regmap = regmap
         self.__ctr   += 1                           # increment counter
 
+        #
+        # varmap = [('argv', '*<BV64 mem_7fffffffffef148_4056_64 + 0x68>'), 
+        #          ('prog', '*<BV64 mem_7fffffffffef148_4056_64 + 0x30>')]
+        # self.__varmap = varmap
+        #
+        #
+        # for a, b in SYM2ADDR.iteritems():
+        #     print 'XXXX', a, hex(b)
+        #
+        # exit()
+        #
+        # regmap = [('__r0', 'r13'), ('__r1', 'rax')]
+        # varmap = [('array', '*<BV64 0x621bf0>')]
+        # self.__varmap = varmap
+        #
+        # regmap = [('__r0', 'rdi'), ('__r1', 'rsi')]
+        # varmap = [('array', 6851008L)]
+        # self.__varmap = varmap
 
         
         # if case that you want to apply a specific mapping, discard all others
@@ -444,6 +584,19 @@ class search:
         # ---------------------------------------------------------------------
         # Identify accepted and clobbering blocks
         # ---------------------------------------------------------------------
+        '''
+        # We check this out on marking to be more efficient
+
+        if 'rsp' in [real for _, real in regmap]:   # make sure that 'rsp' is not used
+            fatal("A virtual register cannot be mapped to %s. Discard mapping..." % bolds('rsp'))
+            return 0                                # try another mapping
+
+        if not MAKE_RBP_SYMBOLIC and 'rbp' in [real for _, real in regmap]:
+            fatal("A virtual register cannot be mapped to %s. Discard mapping..." % bolds('rbp'))
+
+            return 0
+
+        '''
 
 
         # given the current mapping, go back to the CFG and mark all accepted blocks
@@ -458,6 +611,11 @@ class search:
 
         # if there are enough accepted blocks, go back to the CFG and mark clobbering blocks
         cloblks = self.__mark.mark_clobbering( regmap, varmap )
+
+        # At this point you can visualize the CFG
+        #
+        # visualize('cfg_test', entry=self.__entry,
+        #     options=VO_DRAW_CFG | VO_DRAW_CLOBBERING | VO_DRAW_ACCEPTED | VO_DRAW_CANDIDATE)
 
 
         # add entry point to accblks (with min uid) to avoid special cases
@@ -513,7 +671,14 @@ class search:
             
 
             # create the Delta Graph for the given permutation        
-            DG = D.delta(self.__cfg, self.__entry, perm, cloblks, adj)
+            DG = D.delta(self.__cfg, self.__entry, perm, cloblks, adj)          
+            
+
+            # visualise delta graph
+            #
+            # visualize(DG.graph, VO_TYPE_DELTA)
+            # exit()
+   
        
 
             # select the K minimum induced subgraphs Hk from the Delta Graph
@@ -549,7 +714,11 @@ class search:
                 self.__options['simulate'] = True
 
 
+                # visualise delta graph with Hk (induced subgraph) 
+                #      visualize(DG.graph, VO_TYPE_DELTA)
+                #        exit()
 
+                #
                 # TODO: In case of conditional jump, we'll have multiple "final" states.
                 # We should check whether those states have conflicting constraints.
                 #
@@ -558,7 +727,29 @@ class search:
                 self.__simstash = []
 
 
-                entry = self.__entry            # use the regular entry point
+                # -------------------------------------------------------------
+                # Easter Egg: When entry point is -1, we skip it and we directly
+                # start from the next statement
+                # -------------------------------------------------------------
+                if self.__entry == -1:
+
+                    if not isinstance(tree[0], tuple):
+                        fatal('First statement is a conditional jump.')
+
+                    # drop first transition (from entry to the 1st statement) and start
+                    # directly from the 1st statement. There is no entry point.
+                    # 
+                    # also update the entry point
+                    _, _, entry = tree.pop(0)
+
+                    pretty_tree.pop(0)
+
+                    emph("Easter Egg found! Skipping entry point")
+
+                    emph('New flattened subgraph: %s' % bolds(str(pretty_tree)), DBG_LVL_1)
+             
+                else:
+                    entry = self.__entry            # use the regular entry point
 
 
                 try:
@@ -575,8 +766,93 @@ class search:
 
                 self.__total_path = set()
                 self.__path = set()
-                self.__enum_tree( tree, simulation )
+                retn = self.__enum_tree( tree, simulation )
 
+                # del simulation                
+
+                dbg_prnt(DBG_LVL_2, "Done. Enumeration finished with exit code %s" % bold(retn))
+
+             
+                # visualize(self.__cfg.graph, VO_TYPE_CFG, 
+                #           options=VO_CFG | VO_ACC | VO_CLOB | VO_PATHS,
+                #           func=self.__proj.kb.functions[0x41C750], entry=0x41C750, 
+                #           paths=self.__total_path)
+                # exit()
+
+
+                if retn == 0 and self.__consistent_stashes():            
+                    self.__nsolutions += 1
+                    self.__options['#solutions'] = self.__nsolutions
+
+
+                    # # visualise delta graph with Hk
+                    #
+                    # visualize(DG.graph, VO_TYPE_DELTA, options=VO_PATHS | VO_DRAW_INF_EDGES,
+                    #           paths=self.__path)
+                    # exit()
+
+
+                    # # visualize CFG again
+                    # visualize(self.__cfg.graph, VO_TYPE_CFG, 
+                    #           options=VO_CFG | VO_ACC | VO_CLOB | VO_PATHS,
+                    #           func=self.__proj.kb.functions[0x444A9D], entry=0x444A9D, 
+                    #           paths=self.__total_path)
+                    # exit()
+
+                    print rainbow(textwrap.dedent('''\n\n
+                            $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $
+                            $                                                                     $
+                            $                 *** S O L U T I O N   F O U N D ***                 $
+                            $                                                                     $
+                            $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $ $
+                            '''))
+
+
+                    emph(bolds('Solution #%d' % self.__nsolutions))
+                    emph('Final Trace: %s' % bolds(str(pretty_tree)))
+
+                    output = O.output( self.__options['format'] )
+                    
+
+                    output.comment('Solution #%d' % self.__nsolutions)
+                    output.comment('Mapping #%d' % self.__ctr)
+                    output.comment('Registers: %s' % ' | '.join(['%s <-> %s' % (virt, real) for virt, real in regmap]))
+                    output.comment('Variables: %s' % ' | '.join(['%s <-> %s' % (var, hex(val) if isinstance(val, long) else str(val)) for var, val in varmap]))
+     
+                    output.comment('')
+                    output.comment('Simulated Trace: %s' % pretty_tree)
+                    output.comment('')
+
+                    output.newline()
+
+                    # cast it to a set to drop duplicates
+                    for addr in set(self.__terminals):
+                        output.breakpoint(addr)
+
+                    output.newline()
+                    output.comment('Entry point')
+                    output.set('$pc', '0x%x' %  entry)
+                    output.newline()
+
+                    # for each active stash, dump all the solutions
+                    for simulation in self.__simstash:
+                        simulation.dump( output )
+
+                    emph(bolds('BOPC is now happy :)'))
+
+                    output.save(self.__options['filename'])                    
+            
+                    # save state
+                    if self.__options['solutions'] == 'one':                  
+
+                        for obj in self.__sim_objs: # free memory
+                            del obj
+
+                        return -1                   # we have a solution. No more mappings
+
+
+                for obj in self.__sim_objs: # free memory
+                    del obj
 
             del DG
 
@@ -642,6 +918,18 @@ class search:
         dbg_prnt(DBG_LVL_1, "Trace searching algorithm finished with exit code %s" % bold(rval))
         
         return rval
+
+
+
+    # ---------------------------------------------------------------------------------------------
+    # raw_results(): 
+    #
+    def raw_results( self ):
+
+        if not self.__solved:
+            raise Exception('There is no trace!')
+
+        return self.__reg, self.__mem, self.__ext
 
 
 

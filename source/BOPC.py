@@ -304,9 +304,10 @@ def load( filename ):
 
 
     # create a quick mapping between addresses and nodes (basic blocks)
+    addrs = []
     for node in CFG.graph.nodes():
         ADDR2NODE[ node.addr ] = node
-
+        addrs.append(node.addr)
 
     # create a quick mapping between basic block addresses and their corresponding functions
     for _, func in CFG.functions.iteritems():       # for each function
@@ -314,7 +315,7 @@ def load( filename ):
             ADDR2FUNC[ addr ] = func
 
 
-    return project, CFG
+    return project, CFG, addrs
 
 
 
@@ -337,6 +338,10 @@ def abstract( mark, mode, filename ):
         mark.abstract_cfg()                         # calculate the abstractions
         mark.save_abstractions(filename)            # and save them
 
+    elif mode == 'saveonly':
+        mark.abstract_cfg()
+        mark.save_abstractions(filename)
+        return -1
 
     return 0
 
@@ -363,8 +368,49 @@ if __name__ == '__main__':
     args = parse_args()                         # process arguments
     set_dbg_lvl( args.dbg_lvl )                 # set debug level in coreutils
 
+    now  = datetime.datetime.now()              # get current time
 
-    if args.source and args.entry:
+
+    # -------------------------------------------------------------------------
+    # Display banner
+    # -------------------------------------------------------------------------
+    print rainbow(textwrap.dedent('''
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        %                                                                    %
+        %                :::::::::   ::::::::  :::::::::   ::::::::          %
+        %               :+:    :+: :+:    :+: :+:    :+: :+:    :+:          %
+        %              +:+    +:+ +:+    +:+ +:+    +:+ +:+                  %
+        %             +#++:++#+  +#+    +:+ +#++:++#+  +#+                   %
+        %            +#+    +#+ +#+    +#+ +#+        +#+                    %
+        %           #+#    #+# #+#    #+# #+#        #+#    #+#              %
+        %          #########   ########  ###         ########                %
+        %                                                                    %
+        %                Block Oriented Programming Compiler                 %
+        %                                                                    %
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        '''))
+
+    print comments
+    print "[*] Starting BOPC %s at %s" % (VERSION, bolds(now.strftime("%d/%m/%Y %H:%M")))
+
+
+    # -------------------------------------------------------------------------
+    # BOPC operation: Emit SPL IR
+    # -------------------------------------------------------------------------
+    if args.emit_IR and args.source:
+        IR = C.compile(args.source)
+        IR.compile()                                # compile the SPL payload
+
+        IR = O.optimize(IR.get_ir())
+        IR.optimize(mode=args.optimizer)           # optimize IR (if needed)
+
+        IR.emit(args.source)
+
+
+    # -------------------------------------------------------------------------
+    # BOPC operation: Trace Search
+    # -------------------------------------------------------------------------
+    elif args.source and args.entry:
         IR = C.compile(args.source)
         IR.compile()                                # compile the SPL payload
 
@@ -372,7 +418,7 @@ if __name__ == '__main__':
         IR.optimize(mode=args.optimizer)            # optimize IR (if needed)
 
 
-        project, CFG = load(args.binary)
+        project, CFG, addrs = load(args.binary)
         mark         = M.mark(project, CFG, IR, 'puts')
 
         if abstract(mark, args.abstractions, args.binary) > -1:
@@ -384,6 +430,8 @@ if __name__ == '__main__':
                 print 'abort';
                 exit()
 
+
+        #   visualize('cfg_cand', entry=entry, options=VO_DRAW_CFG|VO_DRAW_CANDIDATE)
 
             # extract payload name (without the extenstion)
             payload_name = ntpath.basename(args.source)
@@ -408,8 +456,31 @@ if __name__ == '__main__':
                 fatal("'mapping' argument must be an integer")
 
 
-            tsearch = S.search(project, CFG, IR, entry, options)
-            tsearch.trace_searching(mark)
+            spl = args.source[args.source.rfind("/") + 1:][:-4]
+            index = 0
+            for entry in addrs:
+                print(str(index) + ":" + str(hex(entry)))
+                index += 1
+
+                tsearch = S.search(project, CFG, IR, entry, options)
+                tsearch.trace_searching(mark)
+                if options['#solutions'] != 0 and options['#solutions'] != '0':
+                    with open("./" + spl + ".txt", "a+") as f:
+                        f.write(str(hex(entry)))
+                        f.write("\n")
+                    f.close()
+                    print("nb")
+
+
+
+            # -----------------------------------------------------------------
+            # Show some statistics
+            # -----------------------------------------------------------------
+            emph("Trace Searching Statistics:" )
+            emph("\tUsed Simulation? %s"  % bolds(options['simulate']))
+            emph("\t%s Mapping(s) tried"  % bold(options['#mappings']))
+            emph("\t%s Solution(s) found" % bold(options['#solutions']))
+
 
 
     # -------------------------------------------------------------------------
@@ -418,3 +489,14 @@ if __name__ == '__main__':
     else:
         fatal('Invalid configuration argument')
 
+
+    emph('')
+    emph('BOPC has finished.', DBG_LVL_0)
+    emph('Have a nice day!',        DBG_LVL_0)
+    emph('Bye bye :)',              DBG_LVL_0)
+
+    warn('A segmentation fault may occur now, due to an internal angr issue')
+
+
+
+# ---------------------------------------------------------------------------------------
